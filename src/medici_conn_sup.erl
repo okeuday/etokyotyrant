@@ -10,7 +10,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start_link/1]).
+-export([start_link/2]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -21,14 +21,11 @@
 %% API functions
 %%====================================================================
 %%--------------------------------------------------------------------
-%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
+%% Function: start_link(SupervisorPid, Options) -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the supervisor
 %%--------------------------------------------------------------------
-start_link() ->
-    start_link([]).
-
-start_link(StartArgs) ->
-    supervisor:start_link(?MODULE, StartArgs).
+start_link(SupervisorPid, Options) ->
+    supervisor:start_link(?MODULE, [SupervisorPid, Options]).
 
 %%====================================================================
 %% Supervisor callbacks
@@ -42,24 +39,27 @@ start_link(StartArgs) ->
 %% to find out about restart strategy, maximum restart frequency and child 
 %% specifications.
 %%--------------------------------------------------------------------
-init(StartArgs) ->
-    {ok, MediciOpts} = application:get_env(options),
-    ClientCount = proplists:get_value(num_connections, MediciOpts, ?NUM_CLIENTS),
-    case proplists:get_bool(native, MediciOpts) of
-	false ->
-	    ChildList = [{list_to_atom("medici_connection_"++integer_to_list(ChildNum)), 
-			  {medici_conn, start_link, StartArgs},
-			  permanent,
-			  2000,
-			  worker,
-			  [medici_conn]} || ChildNum <- lists:seq(1, ClientCount)];
-	true ->
-	    ChildList = [{list_to_atom("medici_connection_"++integer_to_list(ChildNum)), 
-			  {medici_native_conn, start_link, StartArgs},
-			  permanent,
-			  2000,
-			  worker,
-			  [medici_native_conn]} || ChildNum <- lists:seq(1, ClientCount)]
+init([SupervisorPid, Options]) ->
+    ClientCount = proplists:get_value(num_connections, Options, ?NUM_CLIENTS),
+    ChildList = case proplists:get_bool(native, Options) of
+    	false ->
+    	    [{ChildNum, 
+    			  {medici_conn, start_link,
+                   [SupervisorPid, Options]},
+    			  permanent,
+    			  2000,
+    			  worker,
+    			  [medici_conn]} || ChildNum <-
+                   lists:seq(1, ClientCount)];
+    	true ->
+    	    [{ChildNum, 
+    			  {medici_native_conn, start_link,
+                   [SupervisorPid, Options]},
+    			  permanent,
+    			  2000,
+    			  worker,
+    			  [medici_native_conn]} || ChildNum <-
+                   lists:seq(1, ClientCount)]
     end,
     {ok,{{one_for_one,ClientCount*2,5}, ChildList}}.
 

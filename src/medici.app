@@ -1,8 +1,5 @@
 %% Medici application resource file.
 %%
-%% Add runtime options in the list value for the options property of
-%% env or set them via a config file or the medici:start() function.
-%%
 {application, medici,
  [{description, "Medici Tokyo Tyrant interface"},
   {vsn, "0.6"},

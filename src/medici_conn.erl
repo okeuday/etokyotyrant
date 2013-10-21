@@ -24,21 +24,20 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	 terminate/2, code_change/3]).
+         terminate/2, code_change/3]).
 
 -include("medici.hrl").
 
--record(state, {socket, mod, endian, controller}).
+-record(state, {socket, mod, endian, controller = undefined}).
 
-%% @spec start_link() -> {ok,Pid} | ignore | {error,Error}
+%% @spec start_link(SupervisorPid, Options) -> {ok,Pid} | ignore | {error,Error}
 %% @private Starts the connection handler
-start_link() ->
-    {ok, MediciOpts} = application:get_env(medici, options),
-    gen_server:start_link(?MODULE, MediciOpts, []).
+start_link(SupervisorPid, Options) ->
+    gen_server:start_link(?MODULE, [SupervisorPid, Options], []).
 
 %%====================================================================
 %% gen_server callbacks
@@ -50,21 +49,25 @@ start_link() ->
 %% Tyrant database in table mode or hash/b-tree/fixed mode and sets the
 %% server to use the appropriate principe access module for its calls.
 %% @end
-init(MediciOpts) ->
-    {ok, Sock} = principe:connect(MediciOpts),
-    case get_db_type(Sock) of
-	{ok, Endian, table} ->
-	    Controller = proplists:get_value(controller, MediciOpts, ?CONTROLLER_NAME),
-	    Controller ! {client_start, self()},
-	    process_flag(trap_exit, true),
-	    {ok, #state{socket=Sock, mod=principe_table, endian=Endian, controller=Controller}};
-	{ok, Endian, _} ->
-	    Controller = proplists:get_value(controller, MediciOpts, ?CONTROLLER_NAME),
-	    Controller ! {client_start, self()},
-	    process_flag(trap_exit, true),
-	    {ok, #state{socket=Sock, mod=principe, endian=Endian, controller=Controller}};
-	{error, _} ->
-	    {stop, connect_failure}
+init([SupervisorPid, Options]) ->
+    {ok, Sock} = principe:connect(Options),
+    Timeout = case proplists:get_value(timeout, Options, 5000) of
+        infinity ->
+            5000;
+        Value ->
+            Value
+    end,
+    case get_db_type(Sock, Timeout) of
+    {ok, Endian, table} ->
+        gen_server:cast(self(), {client_start, SupervisorPid}),
+        process_flag(trap_exit, true),
+        {ok, #state{socket=Sock, mod=principe_table, endian=Endian}};
+    {ok, Endian, _} ->
+        gen_server:cast(self(), {client_start, SupervisorPid}),
+        process_flag(trap_exit, true),
+        {ok, #state{socket=Sock, mod=principe, endian=Endian}};
+    {error, _} ->
+        {stop, connect_failure}
     end.
 
 %% @spec handle_call(Request, From, State) -> {stop, Reason, State}
@@ -78,87 +81,109 @@ handle_call(Request, _From, State) ->
 
 %% @spec handle_cast(Msg, State) -> {noreply, State} | {stop, Reason, State}
 %% @private Handle cast messages to forward to the remote database
+handle_cast({client_start, SupervisorPid}, State) ->
+    case medici_sup:get_controller(SupervisorPid) of
+        {ok, ControllerPid} ->
+            ControllerPid ! {client_start, self()},
+            {noreply, State#state{controller=ControllerPid}};
+        {error, _} = Error ->
+            {stop, Error, State}
+    end;
 handle_cast(stop, State) ->
     {stop, asked_to_stop, State};
-handle_cast({From, tune}, State) ->
+handle_cast({From, tune, Timeout}, State) ->
     %% DB tuning request will come in via this channel, but is not just passed
     %% through to principe/tyrant.  Handle it here.
-    Result = tune_db(State),
+    Result = tune_db(State, Timeout),
     gen_server:reply(From, Result),
     {noreply, State};
 handle_cast({From, CallFunc}=Request, State) when is_atom(CallFunc) ->
     Module = State#state.mod,
     Result = Module:CallFunc(State#state.socket),
     case Result of
-	{error, conn_closed} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	{error, conn_error} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	_ ->
-	    gen_server:reply(From, Result),
-	    {noreply, State}
+    {error, conn_closed} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    {error, conn_error} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    _ ->
+        gen_server:reply(From, Result),
+        {noreply, State}
     end;
 handle_cast({From, CallFunc, Arg1}=Request, State) when is_atom(CallFunc) ->
     Module = State#state.mod,
     Result = Module:CallFunc(State#state.socket, Arg1),
     case Result of
-	{error, conn_closed} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	{error, conn_error} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	_ ->
-	    gen_server:reply(From, Result),
-	    {noreply, State}
+    {error, conn_closed} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    {error, conn_error} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    _ ->
+        gen_server:reply(From, Result),
+        {noreply, State}
     end;
-handle_cast({_From, putnr, Key, Value}, State) ->
+handle_cast({_From, putnr, Key, Value, Timeout}, State) ->
     Module = State#state.mod,
-    Module:putnr(State#state.socket, Key, Value),
+    Module:putnr(State#state.socket, Key, Value, Timeout),
     {noreply, State};
 handle_cast({From, CallFunc, Arg1, Arg2}=Request, State) when is_atom(CallFunc) ->
     Module = State#state.mod,
     Result = Module:CallFunc(State#state.socket, Arg1, Arg2),
     case Result of
-	{error, conn_closed} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	{error, conn_error} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	_ ->
-	    gen_server:reply(From, Result),
-	    {noreply, State}
+    {error, conn_closed} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    {error, conn_error} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    _ ->
+        gen_server:reply(From, Result),
+        {noreply, State}
     end;
 handle_cast({From, CallFunc, Arg1, Arg2, Arg3}=Request, State) when is_atom(CallFunc) ->
     Module = State#state.mod,
     Result = Module:CallFunc(State#state.socket, Arg1, Arg2, Arg3),
     case Result of
-	{error, conn_closed} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	{error, conn_error} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	_ ->
-	    gen_server:reply(From, Result),
-	    {noreply, State}
+    {error, conn_closed} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    {error, conn_error} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    _ ->
+        gen_server:reply(From, Result),
+        {noreply, State}
     end;
 handle_cast({From, CallFunc, Arg1, Arg2, Arg3, Arg4}=Request, State) when is_atom(CallFunc) ->
     Module = State#state.mod,
     Result = Module:CallFunc(State#state.socket, Arg1, Arg2, Arg3, Arg4),
     case Result of
-	{error, conn_closed} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	{error, conn_error} ->
-	    State#state.controller ! {retry, self(), Result, Request},
-	    {stop, connection_error, State};
-	_ ->
-	    gen_server:reply(From, Result),
-	    {noreply, State}
+    {error, conn_closed} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    {error, conn_error} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    _ ->
+        gen_server:reply(From, Result),
+        {noreply, State}
+    end;
+handle_cast({From, CallFunc, Arg1, Arg2, Arg3, Arg4, Arg5}=Request, State) when is_atom(CallFunc) ->
+    Module = State#state.mod,
+    Result = Module:CallFunc(State#state.socket, Arg1, Arg2, Arg3, Arg4, Arg5),
+    case Result of
+    {error, conn_closed} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    {error, conn_error} ->
+        State#state.controller ! {retry, self(), Result, Request},
+        {stop, connection_error, State};
+    _ ->
+        gen_server:reply(From, Result),
+        {noreply, State}
     end.
 
 %% @spec handle_info(Info, State) -> {noreply, State}
@@ -175,7 +200,7 @@ handle_info(_Info, State) ->
 %% @end
 terminate(_Reason, State) ->
     Module = State#state.mod,
-    Module:sync(State#state.socket),
+    Module:sync(State#state.socket, 1000),
     gen_tcp:close(State#state.socket),
     State#state.controller ! {client_end, self()},
     ok.
@@ -189,68 +214,70 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 
-%% @spec get_db_type(Socket::port()) -> {error, Reason::term()} |
-%%                                      {ok, endian(), db_type()}
+%% @spec get_db_type(Socket::port(),
+%%                   Timeout::integer()) -> {error, Reason::term()} |
+%%                                          {ok, endian(), db_type()}
 %% @type endian() = little | big
 %% @type db_type() = hash | tree | fixed | table
 %% @private: Query the remote end of the socket to get the remote database type
-get_db_type(Socket) when is_port(Socket) ->
-    StatInfo = principe:stat(Socket),
+get_db_type(Socket, Timeout)
+    when is_port(Socket), is_integer(Timeout) ->
+    StatInfo = principe:stat(Socket, Timeout),
     case StatInfo of
-	{error, Reason} ->
-	    {error, Reason};
-	StatList ->
-	    case proplists:get_value(bigend, StatList) of
-		"0" ->
-		    Endian = little;
-		_ ->
-		    Endian = big
-	    end,
-	    case proplists:get_value(type, StatList) of
-		"on-memory hash" -> 
-		    Type = hash;
-		"table" -> 
-		    Type = table;
-		"on-memory tree" -> 
-		    Type = tree;
-		"B+ tree" -> 
-		    Type = tree;
-		"hash" ->
-		    Type = hash;
-		"fixed-length" ->
-		    Type = fixed;
-		_ -> 
-		    ?DEBUG_LOG("~p:get_db_type returned ~p~n", [?MODULE, proplists:get_value(type, StatList)]),
-		    Type = error
-	    end,
-	    case Type of
-		error ->
-		    {error, unknown_db_type};
-		_ ->
-		    {ok, Endian, Type}
-	    end	    
+    {error, Reason} ->
+        {error, Reason};
+    StatList ->
+        Endian = case proplists:get_value(bigend, StatList) of
+        "0" ->
+            little;
+        _ ->
+            big
+        end,
+        Type = case proplists:get_value(type, StatList) of
+        "on-memory hash" -> 
+            hash;
+        "table" -> 
+            table;
+        "on-memory tree" -> 
+            tree;
+        "B+ tree" -> 
+            tree;
+        "hash" ->
+            hash;
+        "fixed-length" ->
+            fixed;
+        _ -> 
+            ?DEBUG_LOG("~p:get_db_type returned ~p~n", [?MODULE, proplists:get_value(type, StatList)]),
+            error
+        end,
+        case Type of
+        error ->
+            {error, unknown_db_type};
+        _ ->
+            {ok, Endian, Type}
+        end        
     end.
 
-tune_db(State) ->
-    StatInfo = principe:stat(State#state.socket),
+tune_db(State, Timeout) ->
+    StatInfo = principe:stat(State#state.socket, Timeout),
     case StatInfo of
-	{error, Reason} ->
-	    ?DEBUG_LOG("Error getting db type for tuning: ~p", [Reason]),
-	    {error, Reason};
-	StatList ->
-	    case proplists:get_value(type, StatList) of
-		"on-memory hash" -> 
-		    Records = list_to_integer(proplists:get_value(rnum, StatList)),
-		    BnumInt = Records * 4,
-		    TuningParam = "bnum=" ++ integer_to_list(BnumInt),
-		    principe:optimize(State#state.socket, TuningParam);
-		"hash" ->
-		    Records = list_to_integer(proplists:get_value(rnum, StatList)),
-		    BnumInt = Records * 4,
-		    TuningParam = "bnum=" ++ integer_to_list(BnumInt),
-		    principe:optimize(State#state.socket, TuningParam);
-		_Other -> 
-		    ?DEBUG_LOG("Can't tune a db of type ~p yet", [_Other]),
-		    {error, db_type_unsupported_for_tuning}
-	    end
+    {error, Reason} ->
+        ?DEBUG_LOG("Error getting db type for tuning: ~p", [Reason]),
+        {error, Reason};
+    StatList ->
+        case proplists:get_value(type, StatList) of
+        "on-memory hash" -> 
+            Records = list_to_integer(proplists:get_value(rnum, StatList)),
+            BnumInt = Records * 4,
+            TuningParam = "bnum=" ++ integer_to_list(BnumInt),
+            principe:optimize(State#state.socket, TuningParam, Timeout);
+        "hash" ->
+            Records = list_to_integer(proplists:get_value(rnum, StatList)),
+            BnumInt = Records * 4,
+            TuningParam = "bnum=" ++ integer_to_list(BnumInt),
+            principe:optimize(State#state.socket, TuningParam, Timeout);
+        _Other -> 
+            ?DEBUG_LOG("Can't tune a db of type ~p yet", [_Other]),
+            {error, db_type_unsupported_for_tuning}
+        end
     end.

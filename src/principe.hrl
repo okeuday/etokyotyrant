@@ -11,7 +11,6 @@
 -define(TSERVER, "localhost").
 -define(TPORT, 1978).
 -define(TOPTS, [binary, {packet, 0}, {nodelay, true}, {active, true}, {keepalive, true}]).
--define(TIMEOUT, 5000).
 
 
 -define(NULL, <<0:8>>).
@@ -82,19 +81,21 @@
 -define(T1(Code), gen_tcp:send(Socket, [<<Code:16>>, <<(iolist_size(Key)):32>>, Key])).
 -define(T2(Code), gen_tcp:send(Socket, [<<Code:16>>, <<(iolist_size(Key)):32>>, <<(iolist_size(Value)):32>>, Key, Value])).
 
--define(TSimple(Func, Args), case principe:misc(Socket, Func, Args) of 
-				 [] -> ok; 
-				 Error -> Error 
-			     end).
--define(TRaw(Func, Args), principe:misc(Socket, Func, Args)).
+-define(TSimple(Func, Args, Timeout),
+        case principe:misc(Socket, Func, Args, Timeout) of 
+        [] -> ok; 
+        Error -> Error 
+        end).
+-define(TRaw(Func, Args, Timeout),
+        principe:misc(Socket, Func, Args, Timeout)).
 
--define(R_SUCCESS, tyrant_response(fun recv_success/1)).
--define(R_INT32, tyrant_response(fun recv_size/1)).
--define(R_INT64, tyrant_response(fun recv_size64/1)).
--define(R_SIZE_DATA, tyrant_response(fun recv_size_data/1)).
--define(R_SIZE64_SIZE64, tyrant_response(fun recv_size64_size64/1)).
--define(R_2TUPLE, tyrant_response(fun recv_count_2tuple/1)).
--define(R_4TUPLE, tyrant_response(fun recv_count_4tuple/1)).
+-define(R_SUCCESS(T), tyrant_response(fun recv_success/2, T)).
+-define(R_INT32(T), tyrant_response(fun recv_size/2, T)).
+-define(R_INT64(T), tyrant_response(fun recv_size64/2, T)).
+-define(R_SIZE_DATA(T), tyrant_response(fun recv_size_data/2, T)).
+-define(R_SIZE64_SIZE64(T), tyrant_response(fun recv_size64_size64/2, T)).
+-define(R_2TUPLE(T), tyrant_response(fun recv_count_2tuple/2, T)).
+-define(R_4TUPLE(T), tyrant_response(fun recv_count_4tuple/2, T)).
 
 
 

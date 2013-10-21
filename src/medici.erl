@@ -26,160 +26,348 @@
 
 -module(medici).
 
-%% Starting and stopping the app
--export([start/0, start/1, stop/0]).
+%% Connecting and Disconnecting
+-export([connect/1, close/1]).
 
 %% Basic API exports
--export([put/2, putkeep/2, putcat/2, putshl/3, putnr/2, out/1, get/1, 
-	 mget/1, vsiz/1, iterinit/0, iternext/0, fwmkeys/2, addint/2,
-	 adddouble/2, adddouble/3, sync/0, vanish/0, rnum/0, size/0, 
-	 stat/0, copy/1, restore/2, setmst/2, optimize/1]).
+-export([addint/3, addint/4,
+         adddouble/3, adddouble/4,
+         adddouble_parts/4, adddouble_parts/5,
+         copy/2, copy/3,
+         fwmkeys/3, fwmkeys/4,
+         get/2, get/3, 
+         iterinit/1, iterinit/2,
+         iternext/1, iternext/2,
+         mget/2, mget/3,
+         optimize/2, optimize/3,
+         out/2, out/3,
+         put/3, put/4,
+         putcat/3, putcat/4,
+         putkeep/3, putkeep/4,
+         putnr/3, putnr/4,
+         putshl/4, putshl/5,
+         restore/3, restore/4,
+         rnum/1, rnum/2,
+         setmst/3, setmst/4,
+         size/1, size/2, 
+         stat/1, stat/2,
+         sync/1, sync/2,
+         vanish/1, vanish/2,
+         vsiz/2, vsiz/3]).
 
 %% Table API exports
--export([update/2, setindex/2, genuid/0, query_limit/2, query_limit/3,
-	 query_add_condition/4, query_order/3, search/1, searchcount/1,
-	 searchout/1]).
+-export([genuid/1, genuid/2,
+         query_add_condition/5, query_add_condition/6,
+         query_limit/3, query_limit/4,
+         query_limit_skip/4, query_limit_skip/5,
+         query_order/4, query_order/5,
+         search/2, search/3,
+         searchcount/2, searchcount/3,
+         searchout/2, searchout/3,
+         setindex/3, setindex/4,
+         update/3, update/4]).
 
 -include("medici.hrl").
 
-%% @spec start() -> {ok, Pid} | Error:term()
-%%
-%% @doc Start the medici application.
-start() ->
-    application:start(medici).
-
-%% @spec start(StartupOptions::proplist()) -> {ok, Pid} | Error:term()
+%% @spec connect(Options::proplist()) -> {ok, Connection} | {error, Reason}
 %%
 %% @doc 
-%% Start the medici application, using a provided proplist as a set of
-%% additional options for the medici application.  WARNING: If you use
-%% start/1 the options you provide will become the new default startup
-%% options until you restart your Erlang VM.
+%% Start the medici tokyo tyrant connections, using the provided proplist.
 %% @end
-start(StartupOptions) when is_list(StartupOptions) ->
-    {ok, AppEnvOptions} = application:get_env(medici, options),
-    CombinedOptions = [StartupOptions | AppEnvOptions],
-    %% Merge into a single set of options, favoring those passed in
-    %% to start/1 over the app env.
-    MediciOptions = [{K, proplists:get_value(K, CombinedOptions)} || 
-			K <- proplists:get_keys(CombinedOptions)],
-    application:put_env(medici, {options, MediciOptions}),
-    application:start(medici).
+connect(Options) when is_list(Options) ->
+    case medici_sup:start_link(Options) of
+        {ok, SupervisorPid} when is_pid(SupervisorPid) ->
+            case lists:keyfind(controller, 1,
+                               supervisor:which_children(SupervisorPid)) of
+                false ->
+                    close({undefined, SupervisorPid}),
+                    {error, "controller does not exist"};
+                {controller, undefined, _, _} ->
+                    close({undefined, SupervisorPid}),
+                    {error, "controller was not started"};
+                {controller, ControllerPid, _, _} when is_pid(ControllerPid) ->
+                    {ok, {ControllerPid, SupervisorPid}}
+            end;
+        {error, _} = Error ->
+            Error
+    end.
 
-stop() ->
-    application:stop(medici).
+close({_, SupervisorPid} = Connection) when is_tuple(Connection) ->
+    unlink(SupervisorPid),
+    erlang:exit(SupervisorPid, normal),
+    ok.
 
-%% NOTE TO THOSE WHO CHANGE THE CONTROLLER NAME:
-%%
-%% The following api calls are just simple wrappers around calls
-%% to gen_server.  If you change the controller name in the app
-%% configuration options you will no longer be able to use this
-%% api, but can quite easily acheive the same effect by just using
-%% gen_server:call() directly with your controller name where this
-%% api uses the ?CONTROLLER_NAME macro.
-
-put(Key, Value) ->
-    gen_server:call(?CONTROLLER_NAME, {put, Key, Value}).
+put(Connection, Key, Value) ->
+    put(Connection, Key, Value, ?TIMEOUT).
+put({ConnectionPid, _}, Key, Value, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {put, Key, Value, Timeout},
+                    Timeout + 5000).
  
-putcat(Key, Value) ->
-    gen_server:call(?CONTROLLER_NAME, {putcat, Key, Value}).
+putcat(Connection, Key, Value) ->
+    putcat(Connection, Key, Value, ?TIMEOUT).
+putcat({ConnectionPid, _}, Key, Value, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {putcat, Key, Value, Timeout},
+                    Timeout + 5000).
 
-putkeep(Key, Value) ->
-    gen_server:call(?CONTROLLER_NAME, {putkeep, Key, Value}).
+putkeep(Connection, Key, Value) ->
+    putkeep(Connection, Key, Value, ?TIMEOUT).
+putkeep({ConnectionPid, _}, Key, Value, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {putkeep, Key, Value, Timeout},
+                    Timeout + 5000).
 
-putshl(Key, Value, Width) ->
-    gen_server:call(?CONTROLLER_NAME, {putshl, Key, Value, Width}).
+putshl(Connection, Key, Value, Width) ->
+    putshl(Connection, Key, Value, Width, ?TIMEOUT).
+putshl({ConnectionPid, _}, Key, Value, Width, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {putshl, Key, Value, Width, Timeout},
+                    Timeout + 5000).
 
-putnr(Key, Value) ->
-    gen_server:cast(?CONTROLLER_NAME, {putnr, Key, Value}).
+putnr(Connection, Key, Value) ->
+    putnr(Connection, Key, Value, ?TIMEOUT).
+putnr({ConnectionPid, _}, Key, Value, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:cast(ConnectionPid,
+                    {putnr, Key, Value, Timeout}).
 
-out(Key) ->
-    gen_server:call(?CONTROLLER_NAME, {out, Key}).
+out(Connection, Key) ->
+    out(Connection, Key, ?TIMEOUT).
+out({ConnectionPid, _}, Key, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {out, Key, Timeout},
+                    Timeout + 5000).
 
-get(Key) ->
-    gen_server:call(?CONTROLLER_NAME, {get, Key}).
+get(Connection, Key) ->
+    get(Connection, Key, ?TIMEOUT).
+get({ConnectionPid, _}, Key, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {get, Key, Timeout},
+                    Timeout + 5000).
 
-mget(KeyList) ->
-    gen_server:call(?CONTROLLER_NAME, {mget, KeyList}).
+mget(Connection, KeyList) ->
+    mget(Connection, KeyList, ?TIMEOUT).
+mget({ConnectionPid, _}, KeyList, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {mget, KeyList, Timeout},
+                    Timeout + 5000).
 
-vsiz(Key) ->
-    gen_server:call(?CONTROLLER_NAME, {vsiz, Key}).
+vsiz(Connection, Key) ->
+    vsiz(Connection, Key, ?TIMEOUT).
+vsiz({ConnectionPid, _}, Key, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {vsiz, Key, Timeout},
+                    Timeout + 5000).
 
-iterinit() ->
-    gen_server:call(?CONTROLLER_NAME, {iterinit}).
+iterinit(Connection) ->
+    iterinit(Connection, ?TIMEOUT).
+iterinit({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {iterinit, Timeout},
+                    Timeout + 5000).
 
-iternext() ->
-    gen_server:call(?CONTROLLER_NAME, {iternext}).
+iternext(Connection) ->
+    iternext(Connection, ?TIMEOUT).
+iternext({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {iternext, Timeout},
+                    Timeout + 5000).
 
-fwmkeys(Prefix, MaxKeys) ->
-    gen_server:call(?CONTROLLER_NAME, {fwmkeys, Prefix, MaxKeys}).
+fwmkeys(Connection, Prefix, MaxKeys) ->
+    fwmkeys(Connection, Prefix, MaxKeys, ?TIMEOUT).
+fwmkeys({ConnectionPid, _}, Prefix, MaxKeys, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {fwmkeys, Prefix, MaxKeys, Timeout},
+                    Timeout + 5000).
 
-addint(Key, Int) ->
-    gen_server:call(?CONTROLLER_NAME, {addint, Key, Int}).
+addint(Connection, Key, Int) ->
+    addint(Connection, Key, Int, ?TIMEOUT).
+addint({ConnectionPid, _}, Key, Int, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {addint, Key, Int, Timeout},
+                    Timeout + 5000).
 
-adddouble(Key, Double) ->
-    gen_server:call(?CONTROLLER_NAME, {adddouble, Key, Double}).
+adddouble(Connection, Key, Double) ->
+    adddouble(Connection, Key, Double, ?TIMEOUT).
+adddouble({ConnectionPid, _}, Key, Double, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {adddouble, Key, Double, Timeout},
+                    Timeout + 5000).
 
-adddouble(Key, IntPart, FracPart) ->
-    gen_server:call(?CONTROLLER_NAME, {adddouble, Key, IntPart, FracPart}).
+adddouble_parts(Connection, Key, IntPart, FracPart) ->
+    adddouble_parts(Connection, Key, IntPart, FracPart, ?TIMEOUT).
+adddouble_parts({ConnectionPid, _}, Key, IntPart, FracPart, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {adddouble, Key, IntPart, FracPart, Timeout},
+                    Timeout + 5000).
 
-sync() ->
-    gen_server:call(?CONTROLLER_NAME, {sync}).
+sync(Connection) ->
+    sync(Connection, ?TIMEOUT).
+sync({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {sync, Timeout},
+                    Timeout + 5000).
 
-vanish() ->
-    gen_server:call(?CONTROLLER_NAME, {vanish}).
+vanish(Connection) ->
+    vanish(Connection, ?TIMEOUT).
+vanish({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {vanish, Timeout},
+                    Timeout + 5000).
 
-optimize(TuningOptions) ->
-    gen_server:call(?CONTROLLER_NAME, {optimize, TuningOptions}).
+optimize(Connection, TuningOptions) ->
+    optimize(Connection, TuningOptions, ?TIMEOUT).
+optimize({ConnectionPid, _}, TuningOptions, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {optimize, TuningOptions, Timeout},
+                    Timeout + 5000).
 
-rnum() ->
-    gen_server:call(?CONTROLLER_NAME, {rnum}).
+rnum(Connection) ->
+    rnum(Connection, ?TIMEOUT).
+rnum({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {rnum, Timeout},
+                    Timeout + 5000).
 
-size() ->
-    gen_server:call(?CONTROLLER_NAME, {size}).
+size(Connection) ->
+    size(Connection, ?TIMEOUT).
+size({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {size, Timeout},
+                    Timeout + 5000).
 
-stat() ->
-    gen_server:call(?CONTROLLER_NAME, {stat}).
+stat(Connection) ->
+    stat(Connection, ?TIMEOUT).
+stat({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {stat, Timeout},
+                    Timeout + 5000).
 
-copy(PathName) ->
-    gen_server:call(?CONTROLLER_NAME, {copy, PathName}).
+copy(Connection, PathName) ->
+    copy(Connection, PathName, ?TIMEOUT).
+copy({ConnectionPid, _}, PathName, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {copy, PathName, Timeout},
+                    Timeout + 5000).
 
-restore(PathName, TimeStamp) ->
-    gen_server:call(?CONTROLLER_NAME, {restore, PathName, TimeStamp}).
+restore(Connection, PathName, TimeStamp) ->
+    restore(Connection, PathName, TimeStamp, ?TIMEOUT).
+restore({ConnectionPid, _}, PathName, TimeStamp, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {restore, PathName, TimeStamp, Timeout},
+                    Timeout + 5000).
 
-setmst(HostName, Port) ->
-    gen_server:call(?CONTROLLER_NAME, {setmst, HostName, Port}).
+setmst(Connection, HostName, Port) ->
+    setmst(Connection, HostName, Port, ?TIMEOUT).
+setmst({ConnectionPid, _}, HostName, Port, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {setmst, HostName, Port, Timeout},
+                    Timeout + 5000).
 
 %% Additional table functions
-update(Key, NewCols) ->
-    gen_server:call(?CONTROLLER_NAME, {update, Key, NewCols}).
+update(Connection, Key, NewCols) ->
+    update(Connection, Key, NewCols, ?TIMEOUT).
+update({ConnectionPid, _}, Key, NewCols, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {update, Key, NewCols, Timeout},
+                    Timeout + 5000).
 
-setindex(Column, Type) ->
-    gen_server:call(?CONTROLLER_NAME, {setindex, Column, Type}).
+setindex(Connection, Column, Type) ->
+    setindex(Connection, Column, Type, ?TIMEOUT).
+setindex({ConnectionPid, _}, Column, Type, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {setindex, Column, Type, Timeout},
+                    Timeout + 5000).
 
-genuid() ->
-    gen_server:call(?CONTROLLER_NAME, {genuid}).
+genuid(Connection) ->
+    genuid(Connection, ?TIMEOUT).
+genuid({ConnectionPid, _}, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {genuid, Timeout},
+                    Timeout + 5000).
 
-query_limit(OldQuery, Max) ->
-    gen_server:call(?CONTROLLER_NAME, {query_limit, OldQuery, Max}).
+query_limit(Connection, OldQuery, Max) ->
+    query_limit(Connection, OldQuery, Max, ?TIMEOUT).
+query_limit({ConnectionPid, _}, OldQuery, Max, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {query_limit, OldQuery, Max, Timeout},
+                    Timeout + 5000).
 
-query_limit(OldQuery, Max, Skip) ->
-    gen_server:call(?CONTROLLER_NAME, {query_limit, OldQuery, Max, Skip}).
+query_limit_skip(Connection, OldQuery, Max, Skip) ->
+    query_limit_skip(Connection, OldQuery, Max, Skip, ?TIMEOUT).
+query_limit_skip({ConnectionPid, _}, OldQuery, Max, Skip, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {query_limit, OldQuery, Max, Skip, Timeout},
+                    Timeout + 5000).
 
-query_add_condition(OldQuery, Column, Op, ExprList) ->
-    gen_server:call(?CONTROLLER_NAME, {query_add_condition, OldQuery, Column, Op, ExprList}).
+query_add_condition(Connection, OldQuery, Column, Op, ExprList) ->
+    query_add_condition(Connection, OldQuery, Column, Op, ExprList, ?TIMEOUT).
+query_add_condition({ConnectionPid, _}, OldQuery, Column, Op, ExprList, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {query_add_condition, OldQuery, Column, Op, ExprList, Timeout},
+                    Timeout + 5000).
 
-query_order(OldQuery, Column, Type) ->
-    gen_server:call(?CONTROLLER_NAME, {query_order, OldQuery, Column, Type}).
+query_order(Connection, OldQuery, Column, Type) ->
+    query_order(Connection, OldQuery, Column, Type, ?TIMEOUT).
+query_order({ConnectionPid, _}, OldQuery, Column, Type, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {query_order, OldQuery, Column, Type, Timeout},
+                    Timeout + 5000).
 
-search(Query) ->
-    gen_server:call(?CONTROLLER_NAME, {search, Query}).
+search(Connection, Query) ->
+    search(Connection, Query, ?TIMEOUT).
+search({ConnectionPid, _}, Query, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {search, Query, Timeout},
+                    Timeout + 5000).
 
-searchcount(Query) ->
-    gen_server:call(?CONTROLLER_NAME, {searchcount, Query}).
+searchcount(Connection, Query) ->
+    searchcount(Connection, Query, ?TIMEOUT).
+searchcount({ConnectionPid, _}, Query, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {searchcount, Query, Timeout},
+                    Timeout + 5000).
 
-searchout(Query) ->
-    gen_server:call(?CONTROLLER_NAME, {searchout, Query}).
+searchout(Connection, Query) ->
+    searchout(Connection, Query, ?TIMEOUT).
+searchout({ConnectionPid, _}, Query, Timeout)
+    when is_integer(Timeout) ->
+    gen_server:call(ConnectionPid,
+                    {searchout, Query, Timeout},
+                    Timeout + 5000).
 
 %% EUnit tests
 %%
@@ -203,14 +391,14 @@ get_random_count(Max) ->
 
 %% setup_table_data() ->
 %%     ColData = [{"rec1", [{"name", "alice"}, {"sport", "baseball"}]},
-%% 	       {"rec2", [{"name", "bob"}, {"sport", "basketball"}]},
-%% 	       {"rec3", [{"name", "carol"}, {"age", "24"}]},
-%% 	       {"rec4", [{"name", "trent"}, {"age", "33"}, {"sport", "football"}]},
-%% 	       {"rec5", [{"name", "mallet"}, {"sport", "tennis"}, {"fruit", "apple"}]}
-%% 	       ],
+%%            {"rec2", [{"name", "bob"}, {"sport", "basketball"}]},
+%%            {"rec3", [{"name", "carol"}, {"age", "24"}]},
+%%            {"rec4", [{"name", "trent"}, {"age", "33"}, {"sport", "football"}]},
+%%            {"rec5", [{"name", "mallet"}, {"sport", "tennis"}, {"fruit", "apple"}]}
+%%            ],
 %%     lists:foreach(fun({Key, ValProplist}) ->
-%% 			  ok = ?MODULE:put(Key, ValProplist)
-%% 		  end, ColData).
+%%               ok = ?MODULE:put(Key, ValProplist)
+%%           end, ColData).
 
 init_test() ->
     ?MODULE:start(),
@@ -256,16 +444,16 @@ put_get_unit() ->
 put_get_random_unit() ->
     ElementCount = get_random_count(),
     PutVals = lists:foldl(fun(_Seq, Acc) ->
-				  KeySize = random:uniform(1024),
-				  Key = crypto:rand_bytes(KeySize),
-				  ValSize = random:uniform(65536),
-				  Val = crypto:rand_bytes(ValSize),
-				  ok = ?MODULE:put(Key, Val),
-				  [{Key, Val} | Acc]
-			  end, [], lists:seq(1, ElementCount)),
+                  KeySize = random:uniform(1024),
+                  Key = crypto:rand_bytes(KeySize),
+                  ValSize = random:uniform(65536),
+                  Val = crypto:rand_bytes(ValSize),
+                  ok = ?MODULE:put(Key, Val),
+                  [{Key, Val} | Acc]
+              end, [], lists:seq(1, ElementCount)),
     lists:foreach(fun({K, V}) ->
-			  ?assert(?MODULE:get(K) =:= V)
-		  end, PutVals).
+              ?assert(?MODULE:get(K) =:= V)
+          end, PutVals).
 
 putkeep_unit() ->
     ok = ?MODULE:put(<<"putkeep1">>, <<"foo">>),
@@ -303,11 +491,11 @@ mget_unit() ->
     ok = ?MODULE:put(<<"mget3">>, <<"carol">>),
     ok = ?MODULE:put(<<"mget4">>, <<"trent">>),
     ?assert(?MODULE:mget([<<"mget1">>, <<"mget2">>, 
-			  <<"mget3">>, <<"mget4">>]) =:= 
-	    [{<<"mget1">>, <<"alice">>}, 
-	     {<<"mget2">>, <<"bob">>}, 
-	     {<<"mget3">>, <<"carol">>}, 
-	     {<<"mget4">>, <<"trent">>}]).
+              <<"mget3">>, <<"mget4">>]) =:= 
+        [{<<"mget1">>, <<"alice">>}, 
+         {<<"mget2">>, <<"bob">>}, 
+         {<<"mget3">>, <<"carol">>}, 
+         {<<"mget4">>, <<"trent">>}]).
 
 vsiz_unit() ->
     ok = ?MODULE:put(<<"vsiz1">>, <<"vsiz test">>),

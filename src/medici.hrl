@@ -8,7 +8,6 @@
 
 %% General defaults
 
--define(CONTROLLER_NAME, medici).
 %% If you change NUM_CLIENTS you should probably also change the 
 %% thnum parameter when starting the tyrant server.
 -define(NUM_CLIENTS, 8). 
@@ -17,6 +16,7 @@
 -define(DEFAULT_SYNC_PERIOD, 5000).
 -define(DEFAULT_TUNE_PERIOD, 300000).
 -define(DEFAULT_COPY_PERIOD, 300000).
+-define(TIMEOUT, 5000).
 
 
 %% Defaults for the tyrant port server

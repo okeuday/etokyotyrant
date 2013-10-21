@@ -10,7 +10,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start_link/1]).
+-export([start_link/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -19,14 +19,11 @@
 %% API functions
 %%====================================================================
 %%--------------------------------------------------------------------
-%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
+%% Function: start_link(Options) -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the supervisor
 %%--------------------------------------------------------------------
-start_link() ->
-    start_link([]).
-
-start_link(StartArgs) ->
-    supervisor:start_link(?MODULE, StartArgs).
+start_link(Options) ->
+    supervisor:start_link(?MODULE, Options).
 
 %%====================================================================
 %% Supervisor callbacks
@@ -40,13 +37,13 @@ start_link(StartArgs) ->
 %% to find out about restart strategy, maximum restart frequency and child 
 %% specifications.
 %%--------------------------------------------------------------------
-init(StartArgs) ->
+init(Options) ->
     PortManager = [{medici_port_srv, 
-		    {medici_port_srv, start_link, StartArgs},
-		    permanent,
-		    2000,
-		    worker,
-		    [medici_port_srv]}],
+                   {medici_port_srv, start_link, [Options]},
+                   permanent,
+                   2000,
+                   worker,
+                   [medici_port_srv]}],
     {ok, {{one_for_one,10, 5}, PortManager}}.
 
 %%====================================================================

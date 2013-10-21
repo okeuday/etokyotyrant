@@ -26,7 +26,13 @@
 %% top supervisor of the tree.
 %%--------------------------------------------------------------------
 start(_Type, StartArgs) ->
-    medici_sup:start_link(StartArgs).
+    {ok, AppEnvOptions} = application:get_env(medici, options),
+    CombinedOptions = [StartArgs | AppEnvOptions],
+    %% Merge into a single set of options, favoring those passed in
+    %% to start/2 over the app env.
+    Options = [{K, proplists:get_value(K, CombinedOptions)} ||
+               K <- proplists:get_keys(CombinedOptions)],
+    medici_sup:start_link(Options).
 
 %%--------------------------------------------------------------------
 %% Function: stop(State) -> void()

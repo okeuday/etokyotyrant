@@ -20,11 +20,40 @@
 
 -module(principe_table).
 
--export([connect/0, connect/1, put/3, putkeep/3, putcat/3, update/3, out/2,
-	 get/2, mget/2, vsiz/2, iterinit/1, iternext/1, fwmkeys/3, sync/1, optimize/2,
-	 vanish/1, rnum/1, size/1, stat/1, copy/2, restore/3, addint/3, adddouble/3, 
-	 adddouble/4, setmst/3, setindex/3, query_limit/3, query_limit/2, query_condition/4,
-	 query_order/3, search/2, genuid/1, searchcount/2, searchout/2]).
+-export([connect/0,
+         connect/1,
+         put/4,
+         putkeep/4,
+         putcat/4,
+         update/4,
+         out/3,
+         get/3,
+         mget/3,
+         vsiz/3,
+         iterinit/2,
+         iternext/2,
+         fwmkeys/4,
+         sync/2,
+         optimize/3,
+         vanish/2,
+         rnum/2,
+         size/2,
+         stat/2,
+         copy/3,
+         restore/4,
+         addint/4,
+         adddouble/4,
+         adddouble/5,
+         setmst/4,
+         setindex/4,
+         query_limit/4,
+         query_limit/3,
+         query_condition/5,
+         query_order/4,
+         search/3,
+         genuid/2,
+         searchcount/3,
+         searchout/3]).
 
 -include("principe.hrl").
 
@@ -40,18 +69,19 @@
 connect() ->
     connect([]).
 
-%% @spec connect(ConnectProps::proplist()) -> {ok, port()} | error()
+%% @spec connect(Options::proplist()) -> {ok, port()} | error()
 %%
 %% @doc 
 %% Establish a connection to the tyrant service using properties in the
-%% ConnectProps proplist to determine the hostname, port number and tcp
+%% Options proplist to determine the hostname, port number and tcp
 %% socket options for the connection.  Any missing parameters are filled
 %% in using the module defaults.
 %% @end
-connect(ConnectProps) ->
-    {ok, Socket} = principe:connect(ConnectProps),
+connect(Options) ->
+    {ok, Socket} = principe:connect(Options),
+    Timeout = proplists:get_value(timeout, Options, 5000),
     % make sure we are connection to a tyrant server in table mode
-    case proplists:get_value(type, principe:stat(Socket)) of
+    case proplists:get_value(type, principe:stat(Socket, Timeout)) of
 	"table" ->
 	    {ok, Socket};
 	_ ->
@@ -63,13 +93,14 @@ connect(ConnectProps) ->
 %%====================================================================
 
 %% @spec mget(Socket::port(),
-%%            KeyList::keylist()) -> [{Key::binary(), Value::proplist()}] | error()
+%%            KeyList::keylist(),
+%%            Timeout::integer()) -> [{Key::binary(), Value::proplist()}] | error()
 %%
 %% @doc 
 %% Get the values for a list of keys.  Due to the way that columns are returned
 %% via the tyrant protocol a null seperator is used to break 
-mget(Socket, KeyList) ->
-    case principe:mget(Socket, KeyList) of
+mget(Socket, KeyList, Timeout) ->
+    case principe:mget(Socket, KeyList, Timeout) of
 	{error, Reason} ->
 	    {error, Reason};
 	MgetResults ->
@@ -112,7 +143,8 @@ return_column_vals([K, V | Tail], Cols) ->
 
 %% @spec addint(Socket::port(),
 %%              Key::key(),
-%%              Int::integer()) -> integer() | error()
+%%              Int::integer(),
+%%              Timeout::integer()) -> integer() | error()
 %%
 %% @doc Add an integer value to the _num column of a given a key.  The
 %% _num column will be created if it does not already exist.
@@ -126,53 +158,57 @@ return_column_vals([K, V | Tail], Cols) ->
 %% a integer_to_list(integer()) value to the num column via a normal put() call
 %% things will work correctly.
 %% @end
-addint(Socket, Key, Int) ->
-    principe:addint(Socket, Key, Int).
+addint(Socket, Key, Int, Timeout) ->
+    principe:addint(Socket, Key, Int, Timeout).
 
 %% @spec adddouble(Socket::port(),
 %%                 Key::key(),
-%%                 Double::float()) -> {Integral::integer(), Fractional::integer()} | error()
+%%                 Double::float(),
+%%                 Timeout::integer()) -> {Integral::integer(), Fractional::integer()} | error()
 %%
 %% @doc Add an float value to the _num column of a given a key.  The
 %% _num column will be created if it does not already exist.
 %% @end
-adddouble(Socket, Key, Double) ->
-    principe:adddouble(Socket, Key, Double).
+adddouble(Socket, Key, Double, Timeout) ->
+    principe:adddouble(Socket, Key, Double, Timeout).
 
 %% @spec adddouble(Socket::port(),
 %%                 Key::key(),
 %%                 Integral::integer(),
-%%                 Fractional::integer()) -> {Integral::integer(), Fractional::integer()} | error()
+%%                 Fractional::integer(),
+%%                 Timeout::integer()) -> {Integral::integer(), Fractional::integer()} | error()
 %%
 %% @doc The raw adddouble function for those who need a bit more control on float adds.
-adddouble(Socket, Key, Integral, Fractional) ->
-    principe:adddouble(Socket, Key, Integral, Fractional).    
+adddouble(Socket, Key, Integral, Fractional, Timeout) ->
+    principe:adddouble(Socket, Key, Integral, Fractional, Timeout).    
 
-%% @spec iterinit(Socket::port()) -> ok | error()
+%% @spec iterinit(Socket::port(), Timeout::integer()) -> ok | error()
 %%
 %% @doc Start iteration protocol.  WARNING: The tyrant iteration protocol has no
 %% concurrency controls whatsoever, so if multiple clients try to do iteration
 %% they will stomp all over each other!
 %% @end
-iterinit(Socket) ->
-    principe:iterinit(Socket).
+iterinit(Socket, Timeout) ->
+    principe:iterinit(Socket, Timeout).
 
-%% @spec iternext(Socket::port()) -> {Key::binary(), Value::binary()} | error()
+%% @spec iternext(Socket::port(), Timeout::integer()) -> {Key::binary(), Value::binary()} | error()
 %%
 %% @doc Get the next key/value pair in the iteration protocol.
-iternext(Socket) ->
-    principe:iternext(Socket).
+iternext(Socket, Timeout) ->
+    principe:iternext(Socket, Timeout).
 
 %% @spec fwmkeys(Socket::port(),
 %%               Prefix::iolist(),
-%%               MaxKeys::integer()) -> [binary()]
+%%               MaxKeys::integer(),
+%%               Timeout::integer()) -> [binary()]
 %%
 %% @doc Return a number of keys that match a given prefix.
-fwmkeys(Socket, Prefix, MaxKeys) ->
-    principe:fwmkeys(Socket, Prefix, MaxKeys).
+fwmkeys(Socket, Prefix, MaxKeys, Timeout) ->
+    principe:fwmkeys(Socket, Prefix, MaxKeys, Timeout).
 
 %% @spec vsiz(Socket::port(),
-%%            Key::key()) -> integer()
+%%            Key::key(),
+%%            Timeout::integer()) -> integer()
 %%
 %% @doc
 %% Get the size of the value for a given key.  The value returned for
@@ -183,66 +219,69 @@ fwmkeys(Socket, Prefix, MaxKeys) ->
 %% the column (i.e. length(ColumnName) + length(ColumnValue) + 2 for each
 %% column.)
 %% @end
-vsiz(Socket, Key) ->
-    principe:vsiz(Socket, Key).
+vsiz(Socket, Key, Timeout) ->
+    principe:vsiz(Socket, Key, Timeout).
 
-%% @spec sync(Socket::port()) -> ok | error()
+%% @spec sync(Socket::port(), Timeout::integer()) -> ok | error()
 %%
 %% @doc Call sync() on the remote database.
-sync(Socket) ->
-    principe:sync(Socket).
+sync(Socket, Timeout) ->
+    principe:sync(Socket, Timeout).
 
-%% @spec vanish(Socket::port()) -> ok | error()
+%% @spec vanish(Socket::port(), Timeout::integer()) -> ok | error()
 %%
 %% @doc Remove all records from the remote database.
-vanish(Socket) ->
-    principe:vanish(Socket).
+vanish(Socket, Timeout) ->
+    principe:vanish(Socket, Timeout).
 
 %% @spec optimize(Socket::port(),
-%%                Params::list()) -> ok | error()
+%%                Params::list(),
+%%                Timeout::integer()) -> ok | error()
 %%
 %% @doc Change the remote database tuning parameters
-optimize(Socket, Params) ->
-    principe:optimize(Socket, Params).
+optimize(Socket, Params, Timeout) ->
+    principe:optimize(Socket, Params, Timeout).
 
 %% Get the number of records in the remote database
-rnum(Socket) ->
-    principe:rnum(Socket).
+rnum(Socket, Timeout) ->
+    principe:rnum(Socket, Timeout).
 
-%% @spec size(Socket::port()) -> integer() | error()
+%% @spec size(Socket::port(), Timeout::integer()) -> integer() | error()
 %%
 %% @doc Get the size in bytes of the remote database.
-size(Socket) ->
-    principe:size(Socket).
+size(Socket, Timeout) ->
+    principe:size(Socket, Timeout).
 
-%% @spec stat(Socket::port()) -> proplist() | error()
+%% @spec stat(Socket::port(), Timeout::integer()) -> proplist() | error()
 %%
 %% @doc Get the status string of a remote database.
-stat(Socket) ->
-    principe:stat(Socket).
+stat(Socket, Timeout) ->
+    principe:stat(Socket, Timeout).
 
 %% @spec copy(Socket::port(), 
-%%            iolist()) -> ok | error()
+%%            iolist(),
+%%            Timeout::integer()) -> ok | error()
 %%
 %% @doc Make a copy of the database file of the remote database.
-copy(Socket, PathName) ->
-    principe:copy(Socket, PathName).
+copy(Socket, PathName, Timeout) ->
+    principe:copy(Socket, PathName, Timeout).
 
 %% @spec restore(Socket::port(), 
 %%               PathName::iolist(), 
 %%               TimeStamp::integer) -> ok | error()
 %%
 %% @doc Restore the database to a particular point in time from the update log.
-restore(Socket, PathName, TimeStamp) ->
-    principe:restore(Socket, PathName, TimeStamp).
+restore(Socket, PathName, TimeStamp, Timeout) ->
+    principe:restore(Socket, PathName, TimeStamp, Timeout).
 
 %% @spec setmst(Socket::port(), 
 %%              HostName::iolist(), 
-%%              Port::integer) -> ok | error()
+%%              Port::integer,
+%%              Timeout::integer()) -> ok | error()
 %%
 %% @doc Set the replication master of a remote database server.
-setmst(Socket, HostName, Port) ->
-    principe:setmst(Socket, HostName, Port).
+setmst(Socket, HostName, Port, Timeout) ->
+    principe:setmst(Socket, HostName, Port, Timeout).
 
 %%====================================================================
 %%  Table functions
@@ -250,30 +289,33 @@ setmst(Socket, HostName, Port) ->
 
 %% @spec put(Socket::port(), 
 %%           Key::key(), 
-%%           Cols::coldata()) -> [] | error()
+%%           Cols::coldata(),
+%%           Timeout::integer()) -> [] | error()
 %%
 %% @doc
 %% Call the Tyrant server to store a new set of column values for the given key.
 %% @end
-put(Socket, Key, Cols) ->
+put(Socket, Key, Cols, Timeout) ->
     Data = encode_table(Cols),
-    ?TSimple(<<"put">>, [Key | Data]).
+    ?TSimple(<<"put">>, [Key | Data], Timeout).
 
 %% @spec putkeep(Socket::port(), 
 %%               Key::key(), 
-%%               Cols::coldata()) -> [] | error()
+%%               Cols::coldata(),
+%%               Timeout::integer()) -> [] | error()
 %%
 %% @doc 
 %% Call the Tyrant server to add a set of column values for a given key.  Will 
 %% return an error if Key is already in the remote database.
 %% @end
-putkeep(Socket, Key, Cols) ->
+putkeep(Socket, Key, Cols, Timeout) ->
     Data = encode_table(Cols),
-    ?TSimple(<<"putkeep">>, [Key | Data]).
+    ?TSimple(<<"putkeep">>, [Key | Data], Timeout).
 
 %% @spec putcat(Socket::port(), 
 %%              Key::key(), 
-%%              Cols::coldata()) -> [] | error()
+%%              Cols::coldata(),
+%%              Timeout::integer()) -> [] | error()
 %%
 %% @doc 
 %% Concatenate a set of column values to the existing value of Key (or
@@ -283,13 +325,14 @@ putkeep(Socket, Key, Cols) ->
 %% those specific columns will be ignored by the remote database. Use the
 %% update() function to overwrite existing column values.
 %% @end
-putcat(Socket, Key, Cols) ->
+putcat(Socket, Key, Cols, Timeout) ->
     Data = encode_table(Cols),
-    ?TSimple(<<"putcat">>, [Key | Data]).
+    ?TSimple(<<"putcat">>, [Key | Data], Timeout).
 
 %% @spec update(Socket::port(), 
 %%              Key::key(), 
-%%              Cols::coldata()) -> [] | error()
+%%              Cols::coldata(),
+%%              Timeout::integer()) -> [] | error()
 %%
 %% @doc 
 %% Update a table entry by merging Cols into existing data for given key. The
@@ -299,10 +342,10 @@ putcat(Socket, Key, Cols) ->
 %% @end
 %%
 %% TODO: better way would be to use a lua server script to perform the merge?
-update(Socket, Key, Cols) ->
-    case principe:misc(Socket, <<"get">>, [Key]) of
+update(Socket, Key, Cols, Timeout) ->
+    UpdatedProps = case principe:misc(Socket, <<"get">>, [Key], Timeout) of
 	{error, _Reason} ->
-	    UpdatedProps = Cols;
+	    Cols;
 	ExistingData ->
 	    OldProps = decode_table(ExistingData),
 	    NewProps = lists:foldl(fun({K, V}, AccIn) when is_list(K) ->
@@ -311,29 +354,31 @@ update(Socket, Key, Cols) ->
 					   [{list_to_binary(atom_to_list(K)), V} | AccIn];
 				      (Other, AccIn) -> [Other | AccIn]
 				   end, OldProps, Cols),
-	    UpdatedProps = [{K, proplists:get_value(K, NewProps)} || K <- proplists:get_keys(NewProps)]
+	    [{K, proplists:get_value(K, NewProps)} || K <- proplists:get_keys(NewProps)]
     end,
     Data = encode_table(UpdatedProps),
-    ?TSimple(<<"put">>, [Key | Data]).
+    ?TSimple(<<"put">>, [Key | Data], Timeout).
 
 %% @spec out(Socket::port(), 
-%%           Key::key()) -> ok | error()
+%%           Key::key(),
+%%           Timeout::integer()) -> ok | error()
 %%
 %% @doc 
 %% Remove a key from the remote database.  Will return an error if Key is
 %% not in the database.
 %% @end
-out(Socket, Key) ->
-    ?TSimple(<<"out">>, [Key]).
+out(Socket, Key, Timeout) ->
+    ?TSimple(<<"out">>, [Key], Timeout).
 
 %% @spec get(Socket::port(), 
-%%           Key::key()) -> proplist() | error()
+%%           Key::key(),
+%%           Timeout::integer()) -> proplist() | error()
 %%
 %% @doc Get the value for a given key. Table data is returned in a proplist of
 %% {ColumnName, ColumnValue} tuples.
 %% @end
-get(Socket, Key) ->
-    case ?TRaw(<<"get">>, [Key]) of 
+get(Socket, Key, Timeout) ->
+    case ?TRaw(<<"get">>, [Key], Timeout) of 
 	{error, Reason} -> 
 	    {error, Reason}; 
 	RecList ->
@@ -342,7 +387,8 @@ get(Socket, Key) ->
 
 %% @spec setindex(Socket::port(),
 %%                ColName::index_col(),
-%%                Type::index_type()) -> ok | error()
+%%                Type::index_type(),
+%%                Timeout::integer()) -> ok | error()
 %%
 %% @doc
 %% Tell the tyrant server to build an index for a column.  The ColName
@@ -351,16 +397,16 @@ get(Socket, Key) ->
 %% selected from decimal (index column as decimal data), lexical (index as
 %% character/string data) or void (remove an existing index for ColName).
 %% @end
-setindex(Socket, primary, Type) when is_atom(Type) ->
-    ?TSimple(<<"setindex">>, [?NULL, setindex_request_val(Type)]);
-setindex(Socket, ColName, Type) when is_atom(Type) ->
-    ?TSimple(<<"setindex">>, [ColName, setindex_request_val(Type)]).
+setindex(Socket, primary, Type, Timeout) when is_atom(Type) ->
+    ?TSimple(<<"setindex">>, [?NULL, setindex_request_val(Type)], Timeout);
+setindex(Socket, ColName, Type, Timeout) when is_atom(Type) ->
+    ?TSimple(<<"setindex">>, [ColName, setindex_request_val(Type)], Timeout).
 
-%% @spec genuid(Socket::port()) -> binary() | error()
+%% @spec genuid(Socket::port(), Timeout::integer()) -> binary() | error()
 %%
 %% @doc Generate a unique id within the set of primary keys
-genuid(Socket) ->
-    case ?TRaw(<<"genuid">>, []) of
+genuid(Socket, Timeout) ->
+    case ?TRaw(<<"genuid">>, [], Timeout) of
 	[NewId] ->
 	    NewId;
 	Error ->
@@ -370,7 +416,8 @@ genuid(Socket) ->
 %% @spec query_condition(Query::proplist(),
 %%                       ColName::iolist(),
 %%                       Op::query_opcode(),
-%%                       ExprList::query_expr()) -> proplist()
+%%                       ExprList::query_expr(),
+%%                       Timeout::integer()) -> proplist()
 %%
 %% @doc
 %% Add a condition for a query.  ExprList should be a list of one or more
@@ -380,7 +427,7 @@ genuid(Socket) ->
 %% the last atom is no_index an existing index on the remote database server will
 %% be bypassed.
 %% @end
-query_condition(Query, ColName, Op, ExprList) when is_list(ExprList) ->
+query_condition(Query, ColName, Op, ExprList, _) when is_list(ExprList) ->
     [{{add_cond, ColName, Op, ExprList}, 
       ["addcond", 
        ?NULL, 
@@ -393,10 +440,11 @@ query_condition(Query, ColName, Op, ExprList) when is_list(ExprList) ->
 
 %% @spec query_limit(Query::proplist(),
 %%                   Max::integer(),
-%%                   Skip::integer()) -> proplist()
+%%                   Skip::integer(),
+%%                   Timeout::integer()) -> proplist()
 %%
 %% @doc Set a limit on the number of returned values for Query, skip the first Skip records.
-query_limit(Query, Max, Skip) when is_integer(Max), Max > 0, is_integer(Skip), Skip >= 0 ->
+query_limit(Query, Max, Skip, _) when is_integer(Max), Max > 0, is_integer(Skip), Skip >= 0 ->
     LimitKey = {set_limit, Max, Skip},
     LimitValue = ["setlimit", 
 		?NULL, 
@@ -411,20 +459,22 @@ query_limit(Query, Max, Skip) when is_integer(Max), Max > 0, is_integer(Skip), S
     end.
 
 %% @spec query_limit(Query::proplist(),
-%%                   Max::integer()) -> proplist()
+%%                   Max::integer(),
+%%                   Timeout::integer()) -> proplist()
 %%
 %% @doc Set a limit on the number of returned values for Query.
 %%
 %% XXX: should the missing skip be 0 or -1 (protocol ref and perl versions seem to disagree)
-query_limit(Query, Max) ->
-    query_limit(Query, Max, 0).
+query_limit(Query, Max, Timeout) ->
+    query_limit(Query, Max, 0, Timeout).
 
 %% @spec query_order(Query::proplist(),
 %%                   ColName::index_col(),
-%%                   Type::order_type()) -> proplist()
+%%                   Type::order_type(),
+%%                   Timeout::integer()) -> proplist()
 %%
 %% @doc Set the order for returned values in Query.
-query_order(Query, primary, Type) when is_atom(Type) ->
+query_order(Query, primary, Type, _) when is_atom(Type) ->
     OrderKey = {set_order, primary, Type},
     OrderValue = ["setorder", 
 		  ?NULL, 
@@ -437,7 +487,7 @@ query_order(Query, primary, Type) when is_atom(Type) ->
 	{value, ExistingKey} ->
 	    [{OrderKey, OrderValue} | proplists:delete(ExistingKey, Query)]
     end;
-query_order(Query, ColName, Type) when is_atom(Type) ->
+query_order(Query, ColName, Type, _) when is_atom(Type) ->
     OrderKey = {set_order, ColName, Type},
     OrderValue = ["setorder", 
 		  ?NULL, 
@@ -452,18 +502,20 @@ query_order(Query, ColName, Type) when is_atom(Type) ->
     end.
 
 %% @spec search(Socket::port,
-%%              Query::proplist()) -> keylist() | error()
+%%              Query::proplist(),
+%%              Timeout::integer()) -> keylist() | error()
 %%
 %% @doc Run a prepared query against the table and return matching keys.
-search(Socket, Query) ->
-    ?TRaw(<<"search">>, [V || {_K, V}=Prop <- Query, is_tuple(Prop), size(Prop)==2]).
+search(Socket, Query, Timeout) ->
+    ?TRaw(<<"search">>, [V || {_K, V}=Prop <- Query, is_tuple(Prop), size(Prop)==2], Timeout).
 
 %% @spec searchcount(Socket::port,
-%%                   Query::proplist()) -> [integer()] | error()
+%%                   Query::proplist(),
+%%                   Timeout::integer()) -> [integer()] | error()
 %%
 %% @doc Run a prepared query against the table and get the count of matching keys.
-searchcount(Socket, Query) ->
-    case ?TRaw(<<"search">>, [V || {_K, V}=Prop <- Query, is_tuple(Prop), size(Prop)==2] ++ ["count"]) of
+searchcount(Socket, Query, Timeout) ->
+    case ?TRaw(<<"search">>, [V || {_K, V}=Prop <- Query, is_tuple(Prop), size(Prop)==2] ++ ["count"], Timeout) of
 	{error, Reason} ->
 	    {error, Reason};
 	[] ->
@@ -473,19 +525,20 @@ searchcount(Socket, Query) ->
     end.
 
 %% @spec searchout(Socket::port,
-%%                 Query::proplist()) -> ok | error()
+%%                 Query::proplist(),
+%%                 Timeout::integer()) -> ok | error()
 %%
 %% @doc Run a prepared query against the table and remove the matching records.
-searchout(Socket, Query) ->
-    ?TSimple(<<"search">>, [V || {_K, V}=Prop <- Query, is_tuple(Prop), size(Prop)==2] ++ ["out"]).
+searchout(Socket, Query, Timeout) ->
+    ?TSimple(<<"search">>, [V || {_K, V}=Prop <- Query, is_tuple(Prop), size(Prop)==2] ++ ["out"], Timeout).
 
 %% %% Run a prepared query against the table and get the matching records.  Due
 %% %% to protocol restraints, the returned result cannot include columns whose
 %% %% name or value include the null (0x0) character.
-%% tblsearchget(Socket, TblQuery) ->
+%% tblsearchget(Socket, TblQuery, Timeout) ->
 %%     void.
 
-%% tblrescols(Socket, TblQuery) ->
+%% tblrescols(Socket, TblQuery, Timeout) ->
 %%     void.
 
  
@@ -602,7 +655,7 @@ encode_table([{K, V} | Tail], Acc) ->
 %% @spec decode_table([value_or_num()]) -> proplist() | error()
 %%
 %% @private Convert list of key, value pairs to a proplist
-decode_table({error, Code}) ->
+decode_table({_, Code}) ->
     {error, Code};
 decode_table(Data) when is_list(Data) ->
     decode_table(Data, []).
